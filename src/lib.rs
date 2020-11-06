@@ -216,6 +216,7 @@ impl NgrokBuilder {
 
 #[cfg(test)]
 mod tests {
+    #[ignore]
     #[test]
     fn simple() {
         let ngrok = crate::builder().http().port(3030).run().unwrap();
