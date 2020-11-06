@@ -3,7 +3,8 @@
 [build]: https://github.com/nkconnor/ngrok/workflows/Rust/badge.svg
 [crate]: https://img.shields.io/crates/v/ngrok
 
-A minimal [ngrok](https://ngrok.com/) wrapper.
+A minimal [ngrok](https://ngrok.com/) wrapper. Only tested on Linux,
+assuming it does not work with Windows (contributions welcome!).
 
 ## Getting Started
 
