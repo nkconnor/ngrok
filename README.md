@@ -10,7 +10,7 @@ assuming it does not work with Windows (contributions welcome!).
 
 ```toml
 [dependencies]
-ngrok = "0.1.0"
+ngrok = "0.1.1"
 ```
 
 ## Usage
