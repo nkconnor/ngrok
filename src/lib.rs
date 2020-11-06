@@ -171,13 +171,6 @@ impl NgrokBuilder {
                                 tx_exit.send(Err(e)).unwrap();
                                 break;
                             }
-                            //match proc.try_wait().map(|_| ()) {
-                            //    Err(e) => {
-                            //        tx_exit.send(Err(e)).unwrap();
-                            //        break;
-                            //    }
-                            //    _ => (),
-                            //}
 
                             // If Ngrok::stop is called, kill the process
                             match rx_stop.try_recv() {
