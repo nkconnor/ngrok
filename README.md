@@ -1,6 +1,6 @@
 # ngrok-rs &emsp; ![Build] ![Crate]
 
-[build]: https://github.com/nkconnor/ngrok/workflows/build/badge.svg
+[build]: https://github.com/nkconnor/ngrok/workflows/Rust/badge.svg
 [crate]: https://img.shields.io/crates/v/ngrok
 
 A minimal [ngrok](https://ngrok.com/) wrapper.
