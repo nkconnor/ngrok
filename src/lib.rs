@@ -1,4 +1,3 @@
-use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::io;
 use std::marker::PhantomData;
@@ -34,13 +33,10 @@ pub enum Error {
     TunnelNotFound,
     #[error(transparent)]
     IOError(#[from] io::Error),
-    #[error(transparent)]
-    RequestError(#[from] reqwest::Error),
 }
 
 #[derive(Debug)]
 pub struct Ngrok {
-    client: Client,
     port: u16,
     stop: Sender<()>,
     exited: Receiver<io::Result<()>>,
@@ -82,11 +78,11 @@ impl Ngrok {
         }
         .expect("Exit channel remains open because instance has not dropped");
 
-        let response = self
-            .client
-            .get("http://localhost:4040/api/tunnels")
-            .send()?
-            .json::<GetTunnels>()?;
+        let response = ureq::get("http://localhost:4040/api/tunnels")
+            .call()
+            .into_json()?;
+
+        let response: GetTunnels = serde_json::from_value(response)?;
 
         let url = response
             .tunnels
@@ -205,7 +201,6 @@ impl NgrokBuilder {
                 stop: tx_stop,
                 exited: rx_exit,
                 port,
-                client: Client::new(),
                 started_at: Instant::now(),
             })
         } else {
