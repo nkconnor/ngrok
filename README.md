@@ -12,7 +12,7 @@ A minimal [ngrok](https://ngrok.com/) wrapper.
 ngrok = "0.1.0"
 ```
 
-## Examples
+## Usage
 
 ```rust
 use ngrok;
