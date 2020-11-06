@@ -66,7 +66,7 @@ impl<'a> Tunnel<'a> {
 
 impl Ngrok {
     /// Retrieve the ngrok tunnel
-    pub fn tunnel<'a>(&'a self) -> Result<Tunnel<'a>, Error> {
+    pub fn tunnel(&self) -> Result<Tunnel<'_>, Error> {
         while self.started_at.elapsed().as_secs() < 4 {
             thread::sleep(Duration::from_secs(1));
         }
@@ -103,7 +103,7 @@ impl Ngrok {
 
 impl Drop for Ngrok {
     /// Stop the Ngrok child process
-    fn drop(&mut self) -> () {
+    fn drop(&mut self) {
         // Process already exited, dooh!
         let _result: io::Result<()> = if let Ok(result) = self.exited.try_recv() {
             result
@@ -158,7 +158,7 @@ impl NgrokBuilder {
             let (tx_exit, rx_exit) = channel();
 
             thread::spawn(move || {
-                match Command::new(executable.unwrap_or("ngrok".to_string()))
+                match Command::new(executable.unwrap_or_else(|| "ngrok".to_string()))
                     .stdout(Stdio::piped())
                     .arg("http")
                     .arg(port.to_string())
@@ -167,13 +167,17 @@ impl NgrokBuilder {
                     Ok(mut proc) => {
                         loop {
                             // See if process exited
-                            match proc.try_wait().map(|_| ()) {
-                                Err(e) => {
-                                    tx_exit.send(Err(e)).unwrap();
-                                    break;
-                                }
-                                _ => (),
+                            if let Err(e) = proc.try_wait() {
+                                tx_exit.send(Err(e)).unwrap();
+                                break;
                             }
+                            //match proc.try_wait().map(|_| ()) {
+                            //    Err(e) => {
+                            //        tx_exit.send(Err(e)).unwrap();
+                            //        break;
+                            //    }
+                            //    _ => (),
+                            //}
 
                             // If Ngrok::stop is called, kill the process
                             match rx_stop.try_recv() {
