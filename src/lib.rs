@@ -56,12 +56,12 @@ pub struct Tunnel<'a> {
 
 impl<'a> Tunnel<'a> {
     /// The tunnel's http URL
-    fn http(&self) -> Url {
+    pub fn http(&self) -> Url {
         self.url.clone()
     }
 
     /// The tunnel's https URL
-    fn https(&self) -> Url {
+    pub fn https(&self) -> Url {
         let mut http = self.url.clone();
         http.set_scheme("https").expect("what could go wrong?");
         http
@@ -120,30 +120,30 @@ impl Drop for Ngrok {
 }
 
 #[derive(Debug, Clone, Default)]
-struct NgrokBuilder {
+pub struct NgrokBuilder {
     http: Option<()>,
     port: Option<u16>,
     executable: Option<String>,
 }
 
-fn builder() -> NgrokBuilder {
+pub fn builder() -> NgrokBuilder {
     NgrokBuilder {
         ..Default::default()
     }
 }
 
 impl NgrokBuilder {
-    fn http(&mut self) -> Self {
+    pub fn http(&mut self) -> Self {
         self.http = Some(());
         self.clone()
     }
 
-    fn port(&mut self, port: u16) -> Self {
+    pub fn port(&mut self, port: u16) -> Self {
         self.port = Some(port);
         self.clone()
     }
 
-    fn executable(&mut self, executable: &str) -> Self {
+    pub fn executable(&mut self, executable: &str) -> Self {
         self.executable = Some(executable.to_string());
         self.clone()
     }
@@ -151,7 +151,7 @@ impl NgrokBuilder {
     // TODO
     // This should return the io::Error early and move the proc
     // into the thread..
-    fn run(self) -> Result<Ngrok, &'static str> {
+    pub fn run(self) -> Result<Ngrok, &'static str> {
         if let NgrokBuilder {
             http: Some(()),
             port: Some(port),
