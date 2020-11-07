@@ -1,6 +1,30 @@
+//! # Ngrok
+//!
+//! A minimal and concise [`ngrok`](https://ngrok.com/) wrapper for Rust. The main use case for the library
+//! is the ability to open public HTTP tunnels to your development server(s) for
+//! integrations tests. TCP support, while not available, should be trivial to support.
+//!
+//! This has been tested with Linux and assume that it does not work on Windows (contributions
+//! welcome).
+//!
+//! ## Usage
+//! ```
+//! fn main() -> std::io::Result<()> {
+//!     let ngrok = ngrok::builder()
+//!           // server protocol
+//!           .http()
+//!           // the port
+//!           .port(3030)
+//!           .run()?;
+//!
+//!     let public: url::Url = ngrok.tunnel()?.http();
+//!
+//!     Ok(())
+//! }
+//! ```
+
 use serde::Deserialize;
 use std::io;
-use std::marker::PhantomData;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
 use std::thread;
@@ -26,28 +50,37 @@ struct ApiTunnel {
 }
 
 #[derive(Error, Debug)]
-pub enum Error {
-    #[error(transparent)]
-    DeserializationError(#[from] serde_json::Error),
-    #[error("Expected a tunnel but found none")]
+enum Error {
+    #[error("Expected a matching tunnel but found none under `ngrok`'s JSON API @ http://localhost:4040/api/tunnels")]
     TunnelNotFound,
-    #[error(transparent)]
-    IOError(#[from] io::Error),
+
+    #[error("Builder expected `{0}`")]
+    BuilderError(&'static str),
 }
 
+impl From<Error> for io::Error {
+    fn from(err: Error) -> Self {
+        io::Error::new(io::ErrorKind::Other, err)
+    }
+}
+
+/// A running `ngrok` process.
 #[derive(Debug)]
 pub struct Ngrok {
+    /// The host port being tunneled
     port: u16,
+    /// Tell the process to exit
     stop: Sender<()>,
+    /// The tunnel's public URL
+    tunnel_url: url::Url,
+    /// The process exited with this result. Sends exactly once
     exited: Receiver<io::Result<()>>,
-    started_at: Instant,
 }
 
-/// A ngrok tunnel. It is supposed to be valid
-/// for 'a which is tied to the underlying  child process
+/// A ngrok tunnel. It has a lifetime which is attached to the underlying child process.
+#[derive(Debug, Clone)]
 pub struct Tunnel<'a> {
-    url: Url,
-    phantom: PhantomData<&'a str>,
+    url: &'a Url,
 }
 
 impl<'a> Tunnel<'a> {
@@ -65,38 +98,30 @@ impl<'a> Tunnel<'a> {
 }
 
 impl Ngrok {
-    /// Retrieve the ngrok tunnel
-    pub fn tunnel(&self) -> Result<Tunnel<'_>, Error> {
-        while self.started_at.elapsed().as_secs() < 4 {
-            thread::sleep(Duration::from_secs(1));
-        }
-
-        // ensure the process hasn't quit
+    /// Determine if the underlying child process has exited
+    /// and return the exit error if so.
+    pub fn status(&self) -> Result<(), io::Error> {
         match self.exited.try_recv() {
-            Err(TryRecvError::Disconnected) => Err(TryRecvError::Disconnected),
+            Ok(Err(e)) => Err(e),
             _ => Ok(()),
         }
-        .expect("Exit channel remains open because instance has not dropped");
+    }
 
-        let response = ureq::get("http://localhost:4040/api/tunnels")
-            .call()
-            .into_json()?;
+    /// Retrieve the ngrok tunnel. This does not check if the tunnel is still
+    /// active.
+    pub fn tunnel_unchecked(&self) -> Tunnel<'_> {
+        Tunnel {
+            url: &self.tunnel_url,
+        }
+    }
 
-        let response: GetTunnels = serde_json::from_value(response)?;
-
-        let url = response
-            .tunnels
-            .into_iter()
-            .find(|tunnel| match tunnel.config.addr.port() {
-                Some(port) => port == self.port,
-                None => false,
-            })
-            .map(|t| Ok(t.public_url))
-            .unwrap_or(Err(Error::TunnelNotFound))?;
+    /// Retrieve the ngrok tunnel. If the underlying process has terminated,
+    /// this will return the exit status.
+    pub fn tunnel(&self) -> Result<Tunnel<'_>, io::Error> {
+        self.status()?;
 
         Ok(Tunnel {
-            url,
-            phantom: PhantomData::default(),
+            url: &self.tunnel_url,
         })
     }
 }
@@ -115,6 +140,7 @@ impl Drop for Ngrok {
     }
 }
 
+/// Build a `Ngrok` process. Use `ngrok::builder()` to create this.
 #[derive(Debug, Clone, Default)]
 pub struct NgrokBuilder {
     http: Option<()>,
@@ -122,6 +148,18 @@ pub struct NgrokBuilder {
     executable: Option<String>,
 }
 
+/// The entry point for starting a `ngrok` tunnel. Only HTTP is currently supported.
+///
+/// **Example**
+///
+/// ```ignore
+/// ngrok::builder()
+///         .executable("ngrok")
+///         .http()
+///         .port(3030)
+///         .run()
+///         .unwrap();
+/// ```
 pub fn builder() -> NgrokBuilder {
     NgrokBuilder {
         ..Default::default()
@@ -129,89 +167,106 @@ pub fn builder() -> NgrokBuilder {
 }
 
 impl NgrokBuilder {
+    /// Set the tunnel protocol to HTTP
     pub fn http(&mut self) -> Self {
         self.http = Some(());
         self.clone()
     }
 
+    /// Set the tunnel port
     pub fn port(&mut self, port: u16) -> Self {
         self.port = Some(port);
         self.clone()
     }
 
+    /// Set the `ngrok` executable path. By default the builder
+    /// assumes `ngrok` is on your path.
     pub fn executable(&mut self, executable: &str) -> Self {
         self.executable = Some(executable.to_string());
         self.clone()
     }
 
-    // TODO
-    // This should return the io::Error early and move the proc
-    // into the thread..
-    pub fn run(self) -> Result<Ngrok, &'static str> {
-        if let NgrokBuilder {
-            http: Some(()),
-            port: Some(port),
-            executable,
-        } = self
-        {
-            let (tx_stop, rx_stop) = channel();
-            let (tx_exit, rx_exit) = channel();
+    /// Start the `ngrok` child process
+    // There is a detached thread that waits for either
+    // A: the Ngrok instance to drop, which in `impl Drop` sends a message over
+    // the channel, or
+    // B: the underlying process to quit
+    pub fn run(self) -> Result<Ngrok, io::Error> {
+        // Prepare for TCP/other
+        let _http = self
+            .http
+            .ok_or_else(|| Error::BuilderError(".http() should have been called"))?;
 
-            thread::spawn(move || {
-                match Command::new(executable.unwrap_or_else(|| "ngrok".to_string()))
-                    .stdout(Stdio::piped())
-                    .arg("http")
-                    .arg(port.to_string())
-                    .spawn()
-                {
-                    Ok(mut proc) => {
-                        loop {
-                            // See if process exited
-                            if let Err(e) = proc.try_wait() {
-                                tx_exit.send(Err(e)).unwrap();
-                                break;
-                            }
+        let port = self
+            .port
+            .ok_or_else(|| Error::BuilderError(".port(port) should have been set"))?;
 
-                            // If Ngrok::stop is called, kill the process
-                            match rx_stop.try_recv() {
-                                Ok(()) => {
-                                    tx_exit.send(proc.kill()).unwrap();
-                                    break;
-                                }
-                                // Nothing to see here, move on.
-                                Err(TryRecvError::Empty) => (),
-                                // This would happen if Ngrok was dropped for example.
-                                // But if that were the case, then nothing could run on the
-                                // channel, right?
-                                Err(TryRecvError::Disconnected) => {
-                                    break;
-                                    //panic!("Channel closed unexpectedly");
-                                }
-                            };
-                        }
-                    }
-                    Err(err) => tx_exit.send(Err(err)).unwrap(),
-                };
-            });
+        let started_at = Instant::now();
 
-            Ok(Ngrok {
-                stop: tx_stop,
-                exited: rx_exit,
-                port,
-                started_at: Instant::now(),
-            })
-        } else {
-            Err("You should have specified http and port")
+        // Start the `ngrok` process
+        let mut proc = Command::new(self.executable.unwrap_or_else(|| "ngrok".to_string()))
+            .stdout(Stdio::piped())
+            .arg("http")
+            .arg(port.to_string())
+            .spawn()?;
+
+        // Give it a minute to start up
+        while started_at.elapsed().as_secs() < 4 {
+            thread::sleep(Duration::from_secs(1));
         }
-    }
-}
 
-#[cfg(test)]
-mod tests {
-    #[ignore]
-    #[test]
-    fn simple() {
-        let ngrok = crate::builder().http().port(3030).run().unwrap();
-        ngrok.tunnel().unwrap();
+        // Retrieve the `tunnel_url`
+        let response = ureq::get("http://localhost:4040/api/tunnels")
+            .call()
+            .into_json()?;
+
+        let response: GetTunnels = serde_json::from_value(response)?;
+
+        let tunnel_url = response
+            .tunnels
+            .into_iter()
+            .find(|tunnel| match tunnel.config.addr.port() {
+                Some(p) => p == port,
+                None => false,
+            })
+            .map(|t| Ok(t.public_url))
+            .unwrap_or(Err(Error::TunnelNotFound))?;
+
+        // Process management
+        let (tx_stop, rx_stop) = channel();
+        let (tx_exit, rx_exit) = channel();
+
+        thread::spawn(move || {
+            loop {
+                // See if process exited
+                if let Err(e) = proc.try_wait() {
+                    tx_exit.send(Err(e)).unwrap();
+                    break;
+                }
+
+                // If Ngrok::stop is called, kill the process
+                match rx_stop.try_recv() {
+                    Ok(()) => {
+                        tx_exit.send(proc.kill()).unwrap();
+                        break;
+                    }
+                    // Nothing to see here, move on.
+                    Err(TryRecvError::Empty) => (),
+                    // This would happen if Ngrok was dropped for example.
+                    // But if that were the case, then nothing could run on the
+                    // channel, right?
+                    Err(TryRecvError::Disconnected) => {
+                        break;
+                    }
+                };
+            }
+        });
+
+        Ok(Ngrok {
+            tunnel_url,
+            stop: tx_stop,
+            exited: rx_exit,
+            port,
+        })
     }
 }
