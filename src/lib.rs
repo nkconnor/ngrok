@@ -24,6 +24,7 @@
 //! ```
 
 use serde::Deserialize;
+use std::fmt;
 use std::io;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
@@ -106,6 +107,11 @@ impl<'a> From<Tunnel<'a>> for url::Url {
 impl AsRef<url::Url> for Tunnel<'_> {
     fn as_ref(&self) -> &url::Url {
         &self.url
+    }
+}
+impl fmt::Display for Tunnel<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.url.fmt(f)
     }
 }
 
@@ -280,5 +286,18 @@ impl NgrokBuilder {
             exited: rx_exit,
             port,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+
+    #[test]
+    fn test_display() {
+        let url = url::Url::parse("http://localhost/api").unwrap();
+        let tunnel = Tunnel { url: &url };
+        assert_eq!(format!("{}", url), format!("{}", tunnel));
     }
 }
