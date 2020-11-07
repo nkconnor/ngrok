@@ -28,6 +28,7 @@ use std::fmt;
 use std::io;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -66,7 +67,7 @@ impl From<Error> for io::Error {
 }
 
 /// A running `ngrok` process.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Ngrok {
     /// The host port being tunneled
     port: u16,
@@ -75,7 +76,7 @@ pub struct Ngrok {
     /// The tunnel's public URL
     tunnel_url: url::Url,
     /// The process exited with this result. Sends exactly once
-    exited: Receiver<io::Result<()>>,
+    exited: Arc<Receiver<io::Result<()>>>,
 }
 
 /// A ngrok tunnel. It has a lifetime which is attached to the underlying child process.
@@ -185,6 +186,13 @@ pub fn builder() -> NgrokBuilder {
 }
 
 impl NgrokBuilder {
+    /// Create a new `NgrokBuilder`
+    pub fn new() -> Self {
+        NgrokBuilder {
+            ..Default::default()
+        }
+    }
+
     /// Set the tunnel protocol to HTTP
     pub fn http(&mut self) -> Self {
         self.http = Some(());
@@ -283,7 +291,7 @@ impl NgrokBuilder {
         Ok(Ngrok {
             tunnel_url,
             stop: tx_stop,
-            exited: rx_exit,
+            exited: Arc::new(rx_exit),
             port,
         })
     }
