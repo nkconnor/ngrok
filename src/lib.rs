@@ -78,7 +78,7 @@ pub struct Ngrok {
 }
 
 /// A ngrok tunnel. It has a lifetime which is attached to the underlying child process.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub struct Tunnel<'a> {
     url: &'a Url,
 }
@@ -94,6 +94,18 @@ impl<'a> Tunnel<'a> {
         let mut http = self.url.clone();
         http.set_scheme("https").expect("what could go wrong?");
         http
+    }
+}
+
+impl<'a> From<Tunnel<'a>> for url::Url {
+    fn from(tun: Tunnel<'a>) -> Self {
+        tun.url.clone()
+    }
+}
+
+impl AsRef<url::Url> for Tunnel<'_> {
+    fn as_ref(&self) -> &url::Url {
+        &self.url
     }
 }
 
