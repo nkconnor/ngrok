@@ -10,27 +10,22 @@
 //! ## Usage
 //! ```
 //! fn main() -> std::io::Result<()> {
-//!     let ngrok = ngrok::builder()
+//!     let tunnel = ngrok::builder()
 //!           // server protocol
 //!           .http()
 //!           // the port
 //!           .port(3030)
 //!           .run()?;
 //!
-//!     let public: url::Url = ngrok.tunnel()?.http();
+//!     let public_url = tunnel.http()?;
 //!
 //!     Ok(())
 //! }
 //! ```
 
+use bichannel::TryRecvError;
 use serde::Deserialize;
-use std::fmt;
-use std::io;
-use std::process::{Command, Stdio};
-use std::sync::mpsc::{channel, Receiver, Sender, TryRecvError};
-use std::sync::Arc;
-use std::thread;
-use std::time::{Duration, Instant};
+use std::{fmt, io, process::Command, process::Stdio, thread, time::Duration, time::Instant};
 use thiserror::Error;
 use url::Url;
 
@@ -40,12 +35,12 @@ struct GetTunnels {
     tunnels: Vec<ApiTunnel>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct Config {
     addr: Url,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 struct ApiTunnel {
     config: Config,
     public_url: Url,
@@ -66,102 +61,75 @@ impl From<Error> for io::Error {
     }
 }
 
-/// A running `ngrok` process.
+/// A running `ngrok` Tunnel.
 #[derive(Debug, Clone)]
-pub struct Ngrok {
-    /// The host port being tunneled
-    port: u16,
-    /// Tell the process to exit
-    stop: Sender<()>,
+pub struct Tunnel {
+    resource: bichannel::Channel<(), io::Result<()>>,
     /// The tunnel's public URL
-    tunnel_url: url::Url,
-    /// The process exited with this result. Sends exactly once
-    exited: Arc<Receiver<io::Result<()>>>,
+    tunnel_http: url::Url,
+    /// The tunnel's public URL
+    tunnel_https: url::Url,
 }
 
-/// A ngrok tunnel. It has a lifetime which is attached to the underlying child process.
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
-pub struct Tunnel<'a> {
-    url: &'a Url,
-}
-
-impl<'a> Tunnel<'a> {
-    /// The tunnel's http URL
-    pub fn http(&self) -> Url {
-        self.url.clone()
-    }
-
-    /// The tunnel's https URL
-    pub fn https(&self) -> Url {
-        let mut http = self.url.clone();
-        http.set_scheme("https").expect("what could go wrong?");
-        http
-    }
-}
-
-impl<'a> From<Tunnel<'a>> for url::Url {
-    fn from(tun: Tunnel<'a>) -> Self {
-        tun.url.clone()
-    }
-}
-
-impl AsRef<url::Url> for Tunnel<'_> {
+impl AsRef<url::Url> for Tunnel {
     fn as_ref(&self) -> &url::Url {
-        &self.url
-    }
-}
-impl fmt::Display for Tunnel<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.url.fmt(f)
+        &self.tunnel_http
     }
 }
 
-impl Ngrok {
+impl fmt::Display for Tunnel {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.tunnel_http.fmt(f)
+    }
+}
+
+impl Tunnel {
+    /// Build a new `ngrok` Tunnel
+    pub fn builder() -> Builder {
+        crate::builder()
+    }
+
     /// Determine if the underlying child process has exited
     /// and return the exit error if so.
     pub fn status(&self) -> Result<(), io::Error> {
-        match self.exited.try_recv() {
+        match self.resource.try_recv() {
             Ok(Err(e)) => Err(e),
             _ => Ok(()),
         }
     }
 
-    /// Retrieve the ngrok tunnel. This does not check if the tunnel is still
-    /// active.
-    pub fn tunnel_unchecked(&self) -> Tunnel<'_> {
-        Tunnel {
-            url: &self.tunnel_url,
-        }
+    /// Retrive the tunnel's http URL. If the underlying process has terminated,
+    /// this will return the exit status
+    pub fn http(&self) -> Result<&Url, io::Error> {
+        self.status()?;
+        Ok(&self.tunnel_http)
     }
 
-    /// Retrieve the ngrok tunnel. If the underlying process has terminated,
-    /// this will return the exit status.
-    pub fn tunnel(&self) -> Result<Tunnel<'_>, io::Error> {
+    /// Retrive the tunnel's https URL. If the underlying process has terminated,
+    /// this will return the exit status
+    pub fn https(&self) -> Result<&Url, io::Error> {
         self.status()?;
-
-        Ok(Tunnel {
-            url: &self.tunnel_url,
-        })
+        Ok(&self.tunnel_https)
     }
 }
 
-impl Drop for Ngrok {
+impl Drop for Tunnel {
     /// Stop the Ngrok child process
     fn drop(&mut self) {
         // Process already exited, dooh!
-        let _result: io::Result<()> = if let Ok(result) = self.exited.try_recv() {
+        let _result: io::Result<()> = if let Ok(result) = self.resource.try_recv() {
             result
         } else {
             // Send the stop signal
-            self.stop.send(()).expect("channel is standing");
-            self.exited.recv().expect("channel is standing")
+            self.resource.send(()).expect("channel is standing");
+            self.resource.recv().expect("channel is standing")
         };
     }
 }
 
-/// Build a `Ngrok` process. Use `ngrok::builder()` to create this.
+/// Build a `ngrok` Tunnel. Use `ngrok::builder()` to create this.
 #[derive(Debug, Clone, Default)]
-pub struct NgrokBuilder {
+pub struct Builder {
     http: Option<()>,
     port: Option<u16>,
     executable: Option<String>,
@@ -179,16 +147,16 @@ pub struct NgrokBuilder {
 ///         .run()
 ///         .unwrap();
 /// ```
-pub fn builder() -> NgrokBuilder {
-    NgrokBuilder {
+pub fn builder() -> Builder {
+    Builder {
         ..Default::default()
     }
 }
 
-impl NgrokBuilder {
-    /// Create a new `NgrokBuilder`
+impl Builder {
+    /// Create a new `Builder`
     pub fn new() -> Self {
-        NgrokBuilder {
+        Builder {
             ..Default::default()
         }
     }
@@ -212,12 +180,13 @@ impl NgrokBuilder {
         self.clone()
     }
 
-    /// Start the `ngrok` child process
+    /// Start the `ngrok` child process. Note this is a blocking call
+    /// and it will sleep for several seconds.
     // There is a detached thread that waits for either
     // A: the Ngrok instance to drop, which in `impl Drop` sends a message over
     // the channel, or
     // B: the underlying process to quit
-    pub fn run(self) -> Result<Ngrok, io::Error> {
+    pub fn run(self) -> Result<Tunnel, io::Error> {
         // Prepare for TCP/other
         let _http = self
             .http
@@ -248,32 +217,38 @@ impl NgrokBuilder {
 
         let response: GetTunnels = serde_json::from_value(response)?;
 
-        let tunnel_url = response
-            .tunnels
-            .into_iter()
-            .find(|tunnel| match tunnel.config.addr.port() {
-                Some(p) => p == port,
-                None => false,
-            })
-            .map(|t| Ok(t.public_url))
-            .unwrap_or(Err(Error::TunnelNotFound))?;
+        // snag both HTTP/HTTPS urls
+        fn find_tunnel_url<I: IntoIterator<Item = ApiTunnel>>(
+            scheme: &'static str,
+            port: u16,
+            iter: I,
+        ) -> Result<url::Url, Error> {
+            iter.into_iter()
+                .find(|tunnel| match tunnel.config.addr.port() {
+                    Some(p) => p == port && tunnel.public_url.scheme() == scheme,
+                    None => false,
+                })
+                .map(|t| Ok(t.public_url))
+                .unwrap_or(Err(Error::TunnelNotFound))
+        }
 
-        // Process management
-        let (tx_stop, rx_stop) = channel();
-        let (tx_exit, rx_exit) = channel();
+        let tunnel_http = find_tunnel_url("http", port, response.tunnels.clone())?;
+        let tunnel_https = find_tunnel_url("https", port, response.tunnels)?;
+
+        let (main, resource) = bichannel::channel();
 
         thread::spawn(move || {
             loop {
                 // See if process exited
                 if let Err(e) = proc.try_wait() {
-                    tx_exit.send(Err(e)).unwrap();
+                    main.send(Err(e)).unwrap();
                     break;
                 }
 
                 // If Ngrok::stop is called, kill the process
-                match rx_stop.try_recv() {
+                match main.try_recv() {
                     Ok(()) => {
-                        tx_exit.send(proc.kill()).unwrap();
+                        main.send(proc.kill()).unwrap();
                         break;
                     }
                     // Nothing to see here, move on.
@@ -288,24 +263,13 @@ impl NgrokBuilder {
             }
         });
 
-        Ok(Ngrok {
-            tunnel_url,
-            stop: tx_stop,
-            exited: Arc::new(rx_exit),
-            port,
+        Ok(Tunnel {
+            tunnel_http,
+            tunnel_https,
+            resource,
         })
     }
 }
 
 #[cfg(test)]
-mod tests {
-
-    use super::*;
-
-    #[test]
-    fn test_display() {
-        let url = url::Url::parse("http://localhost/api").unwrap();
-        let tunnel = Tunnel { url: &url };
-        assert_eq!(format!("{}", url), format!("{}", tunnel));
-    }
-}
+mod tests {}
