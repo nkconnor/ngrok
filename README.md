@@ -1,16 +1,17 @@
-# ngrok &emsp; ![Build] ![Crate]
+# ngrok &emsp; ![Build] [![Crate]](https://crates.io/crates/ngrok) [![Docs]](https://docs.rs/ngrok/)
 
 [build]: https://github.com/nkconnor/ngrok/workflows/Rust/badge.svg
 [crate]: https://img.shields.io/crates/v/ngrok
+[docs]: https://docs.rs/ngrok/badge.svg
 
-A minimal [ngrok](https://ngrok.com/) wrapper for Rust. Only tested on Linux,
-assuming it does not work with Windows (contributions welcome!).
+A minimal and concise [ngrok](https://ngrok.com/) client library for Rust. We've only tested on Linux,
+and assuming it does not work with Windows (contributions welcome!).
 
 ## Getting Started
 
 ```toml
 [dependencies]
-ngrok = "0.3.0"
+ngrok = "0.4.0"
 ```
 
 ## Usage
@@ -19,18 +20,22 @@ ngrok = "0.3.0"
 use ngrok;
 
 fn main() -> std::io::Result<()> {
-    let ngrok = ngrok::builder()
+    let tunnel = ngrok::builder()
         .http()
         .port(3030)
         .run()?;
 
-    let tunnel: url::Url = ngrok.tunnel()?.http();
+    let public_url: url::Url = ngrok.http()?;
 
     println!("Tunnel is open at {:?}", tunnel);
 
     Ok(())
 }
 ```
+
+This assumes that `ngrok` is on your path. To change this, use the `.executable()` method in the builder when
+creating your tunnel.
+
 
 ## License
 
