@@ -25,9 +25,9 @@ fn main() -> std::io::Result<()> {
         .port(3030)
         .run()?;
 
-    let public_url: url::Url = ngrok.http()?;
+    let public_url: url::Url = tunnel.http()?;
 
-    println!("Tunnel is open at {:?}", tunnel);
+    println!("Tunnel is open at {:?}", public_url);
 
     Ok(())
 }
