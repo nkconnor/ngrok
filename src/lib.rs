@@ -205,35 +205,26 @@ impl Builder {
             .arg(port.to_string())
             .spawn()?;
 
-        // Give it a minute to start up
-        while started_at.elapsed().as_secs() < 4 {
-            thread::sleep(Duration::from_secs(1));
-        }
+        // ngrok takes a bit to start up and this is a (probably bad) way to wait
+        // for the tunnel to appear:
 
-        // Retrieve the `tunnel_url`
-        let response = ureq::get("http://localhost:4040/api/tunnels")
-            .call()
-            .into_json()?;
+        let (tunnel_http, tunnel_https) = {
+            loop {
+                let tunnels = find_tunnels(port);
 
-        let response: GetTunnels = serde_json::from_value(response)?;
+                if tunnels.is_ok() {
+                    break tunnels;
+                }
 
-        // snag both HTTP/HTTPS urls
-        fn find_tunnel_url<I: IntoIterator<Item = ApiTunnel>>(
-            scheme: &'static str,
-            port: u16,
-            iter: I,
-        ) -> Result<url::Url, Error> {
-            iter.into_iter()
-                .find(|tunnel| match tunnel.config.addr.port() {
-                    Some(p) => p == port && tunnel.public_url.scheme() == scheme,
-                    None => false,
-                })
-                .map(|t| Ok(t.public_url))
-                .unwrap_or(Err(Error::TunnelNotFound))
-        }
+                // If 5 seconds have elapsed, mission failed
+                if started_at.elapsed().as_secs() > 5 {
+                    break tunnels;
+                }
 
-        let tunnel_http = find_tunnel_url("http", port, response.tunnels.clone())?;
-        let tunnel_https = find_tunnel_url("https", port, response.tunnels)?;
+                // Elsewise try again in 300 millis
+                thread::sleep(Duration::from_millis(300));
+            }
+        }?;
 
         let (main, resource) = bichannel::channel();
 
@@ -269,6 +260,35 @@ impl Builder {
             resource,
         })
     }
+}
+
+fn find_tunnels(port: u16) -> Result<(url::Url, url::Url), io::Error> {
+    // Retrieve the `tunnel_url`
+    let response = ureq::get("http://localhost:4040/api/tunnels")
+        .call()
+        .into_json()?;
+
+    let response: GetTunnels = serde_json::from_value(response)?;
+
+    // snag both HTTP/HTTPS urls
+    fn find_tunnel_url<I: IntoIterator<Item = ApiTunnel>>(
+        scheme: &'static str,
+        port: u16,
+        iter: I,
+    ) -> Result<url::Url, Error> {
+        iter.into_iter()
+            .find(|tunnel| match tunnel.config.addr.port() {
+                Some(p) => p == port && tunnel.public_url.scheme() == scheme,
+                None => false,
+            })
+            .map(|t| Ok(t.public_url))
+            .unwrap_or(Err(Error::TunnelNotFound))
+    }
+
+    let tunnel_http = find_tunnel_url("http", port, response.tunnels.clone())?;
+    let tunnel_https = find_tunnel_url("https", port, response.tunnels)?;
+
+    Ok((tunnel_http, tunnel_https))
 }
 
 #[cfg(test)]
