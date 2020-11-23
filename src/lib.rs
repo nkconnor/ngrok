@@ -295,4 +295,28 @@ mod tests {
         std::thread::sleep(Duration::from_millis(2500));
         assert!(tunnel.http().is_err())
     }
+
+    #[tokio::test(threaded_scheduler)]
+    async fn test_proxy_to_local_server() {
+        use warp::Filter;
+
+        let routes = warp::any().map(|| warp::reply());
+
+        let handle =
+            tokio::task::spawn(
+                async move { warp::serve(routes).run(([127, 0, 0, 1], 3060)).await },
+            );
+
+        let tunnel = builder()
+            .executable("./ngrok")
+            .http()
+            .port(3060)
+            .run()
+            .unwrap();
+
+        let status = ureq::get(tunnel.http().unwrap().as_str()).call().status();
+        assert_eq!(status, 200);
+
+        drop(handle)
+    }
 }
