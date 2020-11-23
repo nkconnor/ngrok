@@ -273,8 +273,8 @@ fn find_tunnels(port: u16) -> Result<(url::Url, url::Url), io::Error> {
         Err(Error::TunnelNotFound)
     }
 
-    let tunnel_http = find_tunnel_url("http", port, tunnels)?;
-    let tunnel_https = find_tunnel_url("https", port, tunnels)?;
+    let tunnel_http = find_tunnel_url("http://", port, tunnels)?;
+    let tunnel_https = find_tunnel_url("https://", port, tunnels)?;
 
     Ok((tunnel_http, tunnel_https))
 }
