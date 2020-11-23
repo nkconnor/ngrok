@@ -24,8 +24,10 @@
 //! }
 //! ```
 
-use bichannel::TryRecvError;
 use serde::Deserialize;
+use std::process::Child;
+use std::sync::Arc;
+use std::sync::Mutex;
 use std::{fmt, io, process::Command, process::Stdio, thread, time::Duration, time::Instant};
 use thiserror::Error;
 use url::Url;
@@ -54,6 +56,9 @@ enum Error {
 
     #[error("Builder expected `{0}`")]
     BuilderError(&'static str),
+
+    #[error("Tunnel exited unexpectedly with exit status `{0}`")]
+    TunnelProcessExited(String),
 }
 
 impl From<Error> for io::Error {
@@ -62,10 +67,12 @@ impl From<Error> for io::Error {
     }
 }
 
+type Resource = Arc<Mutex<Child>>;
+
 /// A running `ngrok` Tunnel.
 #[derive(Debug, Clone)]
 pub struct Tunnel {
-    resource: bichannel::Channel<(), io::Result<()>>,
+    pub(crate) proc: Resource,
     /// The tunnel's public URL
     tunnel_http: url::Url,
     /// The tunnel's public URL
@@ -93,38 +100,44 @@ impl Tunnel {
     /// Determine if the underlying child process has exited
     /// and return the exit error if so.
     pub fn status(&self) -> Result<(), io::Error> {
-        match self.resource.try_recv() {
-            Ok(Err(e)) => Err(e),
-            _ => Ok(()),
-        }
+        let status = { self.proc.lock().unwrap().try_wait()? };
+
+        status
+            .map(|code| Err(Error::TunnelProcessExited(code.to_string())))
+            .unwrap_or(Ok(()))?;
+
+        Ok(())
     }
 
-    /// Retrive the tunnel's http URL. If the underlying process has terminated,
+    /// Retrieve the tunnel's http URL. If the underlying process has terminated,
     /// this will return the exit status
     pub fn http(&self) -> Result<&Url, io::Error> {
         self.status()?;
         Ok(&self.tunnel_http)
     }
 
-    /// Retrive the tunnel's https URL. If the underlying process has terminated,
+    /// Retrieve the tunnel's https URL. If the underlying process has terminated,
     /// this will return the exit status
     pub fn https(&self) -> Result<&Url, io::Error> {
         self.status()?;
         Ok(&self.tunnel_https)
+    }
+
+    /// Retrieve the tunnel's http URL.
+    pub fn http_unchecked(&self) -> &Url {
+        &self.tunnel_http
+    }
+
+    /// Retrieve the tunnel's https URL.
+    pub fn https_unchecked(&self) -> &Url {
+        &self.tunnel_https
     }
 }
 
 impl Drop for Tunnel {
     /// Stop the Ngrok child process
     fn drop(&mut self) {
-        // Process already exited, dooh!
-        let _result: io::Result<()> = if let Ok(result) = self.resource.try_recv() {
-            result
-        } else {
-            // Send the stop signal
-            self.resource.send(()).expect("channel is standing");
-            self.resource.recv().expect("channel is standing")
-        };
+        let _result = self.proc.lock().unwrap().kill();
     }
 }
 
@@ -140,7 +153,7 @@ pub struct Builder {
 ///
 /// **Example**
 ///
-/// ```ignore
+/// ```
 /// ngrok::builder()
 ///         .executable("ngrok")
 ///         .http()
@@ -200,7 +213,7 @@ impl Builder {
         let started_at = Instant::now();
 
         // Start the `ngrok` process
-        let mut proc = Command::new(self.executable.unwrap_or_else(|| "ngrok".to_string()))
+        let proc = Command::new(self.executable.unwrap_or_else(|| "ngrok".to_string()))
             .stdout(Stdio::piped())
             .arg("http")
             .arg(port.to_string())
@@ -208,7 +221,6 @@ impl Builder {
 
         // ngrok takes a bit to start up and this is a (probably bad) way to wait
         // for the tunnel to appear:
-
         let (tunnel_http, tunnel_https) = {
             loop {
                 let tunnels = find_tunnels(port);
@@ -227,38 +239,10 @@ impl Builder {
             }
         }?;
 
-        let (main, resource) = bichannel::channel();
-
-        thread::spawn(move || {
-            loop {
-                // See if process exited
-                if let Err(e) = proc.try_wait() {
-                    main.send(Err(e)).unwrap();
-                    break;
-                }
-
-                // If Ngrok::stop is called, kill the process
-                match main.try_recv() {
-                    Ok(()) => {
-                        main.send(proc.kill()).unwrap();
-                        break;
-                    }
-                    // Nothing to see here, move on.
-                    Err(TryRecvError::Empty) => (),
-                    // This would happen if Ngrok was dropped for example.
-                    // But if that were the case, then nothing could run on the
-                    // channel, right?
-                    Err(TryRecvError::Disconnected) => {
-                        break;
-                    }
-                };
-            }
-        });
-
         Ok(Tunnel {
             tunnel_http,
             tunnel_https,
-            resource,
+            proc: Arc::new(Mutex::new(proc)),
         })
     }
 }
@@ -293,4 +277,14 @@ fn find_tunnels(port: u16) -> Result<(url::Url, url::Url), io::Error> {
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_error_status_if_proc_killed() {
+        let tunnel = builder().http().port(3000).run().unwrap();
+        tunnel.proc.lock().unwrap().kill().unwrap();
+        std::thread::sleep(Duration::from_millis(2500));
+        assert!(tunnel.http().is_err())
+    }
+}
