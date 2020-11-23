@@ -22,4 +22,4 @@ jobs:
             wget https://bin.equinox.io/c/4VmDzA7iaHb/ngrok-stable-linux-amd64.zip &&
             unzip ./ngrok-stable-linux-amd64.zip &&
             export PATH=$PATH:"$PWD/ngrok" &&
-            cargo test --verbose -- --test-threadsd=1
+            cargo test --verbose -- --test-threads=1
