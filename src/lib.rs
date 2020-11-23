@@ -102,11 +102,12 @@ impl Tunnel {
     pub fn status(&self) -> Result<(), io::Error> {
         let status = { self.proc.lock().unwrap().try_wait()? };
 
-        status
-            .map(|code| Err(Error::TunnelProcessExited(code.to_string())))
-            .unwrap_or(Ok(()))?;
-
-        Ok(())
+        match status {
+            Some(code) => Err(io::Error::from(Error::TunnelProcessExited(
+                code.to_string(),
+            ))),
+            _ => Ok(()),
+        }
     }
 
     /// Retrieve the tunnel's http URL. If the underlying process has terminated,
