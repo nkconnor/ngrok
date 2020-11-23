@@ -24,7 +24,6 @@
 //! }
 //! ```
 
-use serde::Deserialize;
 use std::process::Child;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -32,25 +31,11 @@ use std::{fmt, io, process::Command, process::Stdio, thread, time::Duration, tim
 use thiserror::Error;
 use url::Url;
 
-// NGROK JSON API types
-#[derive(Debug, Deserialize)]
-struct GetTunnels {
-    tunnels: Vec<ApiTunnel>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct Config {
-    addr: Url,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct ApiTunnel {
-    config: Config,
-    public_url: Url,
-}
-
 #[derive(Error, Debug)]
 enum Error {
+    #[error("Unexpected JSON found in `ngrok`'s JSON API")]
+    MalformedAPIResponse,
+
     #[error("Expected a matching tunnel but found none under `ngrok`'s JSON API @ http://localhost:4040/api/tunnels")]
     TunnelNotFound,
 
@@ -158,7 +143,7 @@ pub struct Builder {
 /// ngrok::builder()
 ///         .executable("./ngrok")
 ///         .http()
-///         .port(3030)
+///         .port(3031)
 ///         .run()
 ///         .unwrap();
 /// ```
@@ -225,7 +210,6 @@ impl Builder {
         let (tunnel_http, tunnel_https) = {
             loop {
                 let tunnels = find_tunnels(port);
-
                 if tunnels.is_ok() {
                     break tunnels;
                 }
@@ -249,30 +233,48 @@ impl Builder {
 }
 
 fn find_tunnels(port: u16) -> Result<(url::Url, url::Url), io::Error> {
+    use serde_json::Value;
+
     // Retrieve the `tunnel_url`
-    let response = ureq::get("http://localhost:4040/api/tunnels")
+    let response: Value = ureq::get("http://localhost:4040/api/tunnels")
         .call()
         .into_json()?;
 
-    let response: GetTunnels = serde_json::from_value(response)?;
+    let tunnels = response
+        .get("tunnels")
+        .and_then(|tunnels| tunnels.as_array())
+        .map(Ok)
+        .unwrap_or(Err(Error::MalformedAPIResponse))?;
 
     // snag both HTTP/HTTPS urls
-    fn find_tunnel_url<I: IntoIterator<Item = ApiTunnel>>(
+    fn find_tunnel_url<'a, I: IntoIterator<Item = &'a Value>>(
         scheme: &'static str,
         port: u16,
         iter: I,
     ) -> Result<url::Url, Error> {
-        iter.into_iter()
-            .find(|tunnel| match tunnel.config.addr.port() {
-                Some(p) => p == port && tunnel.public_url.scheme() == scheme,
-                None => false,
-            })
-            .map(|t| Ok(t.public_url))
-            .unwrap_or(Err(Error::TunnelNotFound))
+        for tunnel in iter {
+            let tunnel_url = tunnel.get("public_url").and_then(|url| url.as_str());
+
+            let is_port = tunnel
+                .get("config")
+                .and_then(|cfg| cfg.get("addr"))
+                .and_then(|addr| addr.as_str())
+                .map(|addr| addr.contains(&port.to_string()))
+                .unwrap_or(false);
+
+            let is_scheme = tunnel_url.map(|url| url.contains(scheme)).unwrap_or(false);
+
+            if is_scheme && is_port {
+                return Ok(url::Url::parse(tunnel_url.unwrap())
+                    .map_err(|_| Error::MalformedAPIResponse)?);
+            }
+        }
+
+        Err(Error::TunnelNotFound)
     }
 
-    let tunnel_http = find_tunnel_url("http", port, response.tunnels.clone())?;
-    let tunnel_https = find_tunnel_url("https", port, response.tunnels)?;
+    let tunnel_http = find_tunnel_url("http://", port, tunnels)?;
+    let tunnel_https = find_tunnel_url("https://", port, tunnels)?;
 
     Ok((tunnel_http, tunnel_https))
 }
