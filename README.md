@@ -1,6 +1,6 @@
 # ngrok &emsp; ![Build] [![Crate]](https://crates.io/crates/ngrok) [![Docs]](https://docs.rs/ngrok/)
 
-[build]: https://github.com/nkconnor/ngrok/workflows/Rust/badge.svg
+[build]: https://github.com/nkconnor/ngrok/workflows/tests/badge.svg
 [crate]: https://img.shields.io/crates/v/ngrok
 [docs]: https://docs.rs/ngrok/badge.svg
 
