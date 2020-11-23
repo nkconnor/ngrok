@@ -156,7 +156,7 @@ pub struct Builder {
 ///
 /// ```
 /// ngrok::builder()
-///         .executable("ngrok")
+///         .executable("./ngrok")
 ///         .http()
 ///         .port(3030)
 ///         .run()
@@ -283,7 +283,12 @@ mod tests {
 
     #[test]
     fn test_error_status_if_proc_killed() {
-        let tunnel = builder().http().port(3000).run().unwrap();
+        let tunnel = builder()
+            .executable("./ngrok")
+            .http()
+            .port(3000)
+            .run()
+            .unwrap();
         tunnel.proc.lock().unwrap().kill().unwrap();
         std::thread::sleep(Duration::from_millis(2500));
         assert!(tunnel.http().is_err())
