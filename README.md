@@ -4,14 +4,18 @@
 [crate]: https://img.shields.io/crates/v/ngrok
 [docs]: https://docs.rs/ngrok/badge.svg
 
-A minimal and concise [ngrok](https://ngrok.com/) client library for Rust. We've only tested on Linux,
-and assuming it does not work with Windows (contributions welcome!).
+A minimal and concise [`ngrok`](https://ngrok.com/) wrapper for Rust. The main use case for the library
+is the ability to open public HTTP tunnels to your development server(s) for
+integrations tests. TCP support, while not available, should be trivial to support.
+
+This has been tested with Linux and assume that it does not work on Windows (contributions
+welcome!).
 
 ## Getting Started
 
 ```toml
 [dependencies]
-ngrok = "0.4.0"
+ngrok = "0.5.0"
 ```
 
 ## Usage
@@ -35,7 +39,6 @@ fn main() -> std::io::Result<()> {
 
 This assumes that `ngrok` is on your path. To change this, use the `.executable()` method in the builder when
 creating your tunnel.
-
 
 ## License
 
