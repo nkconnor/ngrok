@@ -190,11 +190,11 @@ impl Builder {
         // Prepare for TCP/other
         let _http = self
             .http
-            .ok_or_else(|| Error::BuilderError(".http() should have been called"))?;
+            .ok_or(Error::BuilderError(".http() should have been called"))?;
 
         let port = self
             .port
-            .ok_or_else(|| Error::BuilderError(".port(port) should have been set"))?;
+            .ok_or(Error::BuilderError(".port(port) should have been set"))?;
 
         let started_at = Instant::now();
 
