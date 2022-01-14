@@ -4,9 +4,11 @@
 [crate]: https://img.shields.io/crates/v/ngrok
 [docs]: https://docs.rs/ngrok/badge.svg
 
-A minimal and concise [`ngrok`](https://ngrok.com/) wrapper for Rust. The main use case for the library
-is the ability to open public HTTP tunnels to your development server(s) for
-integrations tests. TCP support, while not available, should be trivial to support.
+A minimal and concise [`ngrok`](https://ngrok.com/) wrapper for Rust. The library has many use cases, for example:
+- open public HTTP tunnels to your development server(s) for integrations tests
+- simplified networking and development on devices like a Raspberry Pi
+
+TCP support, while not available, should be trivial to support.
 
 This has been tested with Linux and we assume that it does not work on Windows (contributions
 welcome!).
