@@ -8,7 +8,7 @@ A minimal and concise [`ngrok`](https://ngrok.com/) wrapper for Rust. The main u
 is the ability to open public HTTP tunnels to your development server(s) for
 integrations tests. TCP support, while not available, should be trivial to support.
 
-This has been tested with Linux and assume that it does not work on Windows (contributions
+This has been tested with Linux and we assume that it does not work on Windows (contributions
 welcome!).
 
 ## Getting Started
