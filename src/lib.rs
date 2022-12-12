@@ -24,27 +24,36 @@
 //! }
 //! ```
 
+use std::fmt::Display;
 use std::process::Child;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::{fmt, io, process::Command, process::Stdio, thread, time::Duration, time::Instant};
-use thiserror::Error;
 use url::Url;
 
-#[derive(Error, Debug)]
+#[derive(Debug)]
 enum Error {
-    #[error("Unexpected JSON found in `ngrok`'s JSON API")]
     MalformedAPIResponse,
 
-    #[error("Expected a matching tunnel but found none under `ngrok`'s JSON API @ http://localhost:4040/api/tunnels")]
     TunnelNotFound,
 
-    #[error("Builder expected `{0}`")]
     BuilderError(&'static str),
 
-    #[error("Tunnel exited unexpectedly with exit status `{0}`")]
     TunnelProcessExited(String),
 }
+
+impl Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::MalformedAPIResponse => write!(f,"Unexpected JSON found in `ngrok`'s JSON API"),
+            Error::TunnelNotFound => write!(f, "Expected a matching tunnel but found none under `ngrok`'s JSON API @ http://localhost:4040/api/tunnels"),
+            Error::BuilderError(arg) => write!(f, "Builder expected {}", arg),
+            Error::TunnelProcessExited(code) => write!(f, "Tunnel exited unexpectedly with exit status {}", code)
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 impl From<Error> for io::Error {
     fn from(err: Error) -> Self {

@@ -15,7 +15,6 @@ readme = "README.md"
 [dependencies]
 ureq = { version = "1", features=["json"] }
 url = "2"
-thiserror = "1"
 serde_json = "1"
 
 [dev_dependencies]
