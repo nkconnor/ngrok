@@ -17,7 +17,7 @@ welcome!).
 
 ```toml
 [dependencies]
-ngrok = "0.5.0"
+ngrok = "0.6.0"
 ```
 
 ## Usage
@@ -27,11 +27,11 @@ use ngrok;
 
 fn main() -> std::io::Result<()> {
     let tunnel = ngrok::builder()
-        .http()
+        .https()
         .port(3030)
         .run()?;
 
-    let public_url: url::Url = tunnel.http()?;
+    let public_url: url::Url = tunnel.public_url()?;
 
     println!("Tunnel is open at {:?}", public_url);
 

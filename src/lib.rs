@@ -12,13 +12,13 @@
 //! fn main() -> std::io::Result<()> {
 //!     let tunnel = ngrok::builder()
 //!           // server protocol
-//!           .http()
+//!           .https()
 //!           // the port
 //! #         .executable("./ngrok")
 //!           .port(3030)
 //!           .run()?;
 //!
-//!     let public_url = tunnel.http()?;
+//!     let public_url = tunnel.public_url()?;
 //!
 //!     Ok(())
 //! }
@@ -59,20 +59,18 @@ type Resource = Arc<Mutex<Child>>;
 pub struct Tunnel {
     pub(crate) proc: Resource,
     /// The tunnel's public URL
-    tunnel_http: url::Url,
-    /// The tunnel's public URL
-    tunnel_https: url::Url,
+    public_url: url::Url,
 }
 
 impl AsRef<url::Url> for Tunnel {
     fn as_ref(&self) -> &url::Url {
-        &self.tunnel_http
+        &self.public_url
     }
 }
 
 impl fmt::Display for Tunnel {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.tunnel_http.fmt(f)
+        self.public_url.fmt(f)
     }
 }
 
@@ -95,28 +93,16 @@ impl Tunnel {
         }
     }
 
-    /// Retrieve the tunnel's http URL. If the underlying process has terminated,
+    /// Retrieve the tunnel's public URL. If the underlying process has terminated,
     /// this will return the exit status
-    pub fn http(&self) -> Result<&Url, io::Error> {
+    pub fn public_url(&self) -> Result<&Url, io::Error> {
         self.status()?;
-        Ok(&self.tunnel_http)
+        Ok(&self.public_url)
     }
 
-    /// Retrieve the tunnel's https URL. If the underlying process has terminated,
-    /// this will return the exit status
-    pub fn https(&self) -> Result<&Url, io::Error> {
-        self.status()?;
-        Ok(&self.tunnel_https)
-    }
-
-    /// Retrieve the tunnel's http URL.
-    pub fn http_unchecked(&self) -> &Url {
-        &self.tunnel_http
-    }
-
-    /// Retrieve the tunnel's https URL.
-    pub fn https_unchecked(&self) -> &Url {
-        &self.tunnel_https
+    /// Retrieve the tunnel's public URL.
+    pub fn public_url_unchecked(&self) -> &Url {
+        &self.public_url
     }
 }
 
@@ -130,19 +116,19 @@ impl Drop for Tunnel {
 /// Build a `ngrok` Tunnel. Use `ngrok::builder()` to create this.
 #[derive(Debug, Clone, Default)]
 pub struct Builder {
-    http: Option<()>,
+    https: Option<()>,
     port: Option<u16>,
     executable: Option<String>,
 }
 
-/// The entry point for starting a `ngrok` tunnel. Only HTTP is currently supported.
+/// The entry point for starting a `ngrok` tunnel. Only HTTPS is currently supported.
 ///
 /// **Example**
 ///
 /// ```
 /// ngrok::builder()
 ///         .executable("./ngrok")
-///         .http()
+///         .https()
 ///         .port(3031)
 ///         .run()
 ///         .unwrap();
@@ -162,8 +148,8 @@ impl Builder {
     }
 
     /// Set the tunnel protocol to HTTP
-    pub fn http(&mut self) -> Self {
-        self.http = Some(());
+    pub fn https(&mut self) -> Self {
+        self.https = Some(());
         self.clone()
     }
 
@@ -189,8 +175,8 @@ impl Builder {
     pub fn run(self) -> Result<Tunnel, io::Error> {
         // Prepare for TCP/other
         let _http = self
-            .http
-            .ok_or(Error::BuilderError(".http() should have been called"))?;
+            .https
+            .ok_or(Error::BuilderError(".https() should have been called"))?;
 
         let port = self
             .port
@@ -207,16 +193,16 @@ impl Builder {
 
         // ngrok takes a bit to start up and this is a (probably bad) way to wait
         // for the tunnel to appear:
-        let (tunnel_http, tunnel_https) = {
+        let public_url = {
             loop {
-                let tunnels = find_tunnels(port);
-                if tunnels.is_ok() {
-                    break tunnels;
+                let public_url = find_public_url(port);
+                if public_url.is_ok() {
+                    break public_url;
                 }
 
                 // If 5 seconds have elapsed, mission failed
                 if started_at.elapsed().as_secs() > 5 {
-                    break tunnels;
+                    break public_url;
                 }
 
                 // Elsewise try again in 300 millis
@@ -225,14 +211,13 @@ impl Builder {
         }?;
 
         Ok(Tunnel {
-            tunnel_http,
-            tunnel_https,
+            public_url,
             proc: Arc::new(Mutex::new(proc)),
         })
     }
 }
 
-fn find_tunnels(port: u16) -> Result<(url::Url, url::Url), io::Error> {
+fn find_public_url(port: u16) -> Result<url::Url, io::Error> {
     use serde_json::Value;
 
     // Retrieve the `tunnel_url`
@@ -273,10 +258,9 @@ fn find_tunnels(port: u16) -> Result<(url::Url, url::Url), io::Error> {
         Err(Error::TunnelNotFound)
     }
 
-    let tunnel_http = find_tunnel_url("http://", port, tunnels)?;
-    let tunnel_https = find_tunnel_url("https://", port, tunnels)?;
+    let public_url = find_tunnel_url("https://", port, tunnels)?;
 
-    Ok((tunnel_http, tunnel_https))
+    Ok(public_url)
 }
 
 #[cfg(test)]
@@ -287,13 +271,13 @@ mod tests {
     fn test_error_status_if_proc_killed() {
         let tunnel = builder()
             .executable("./ngrok")
-            .http()
-            .port(3000)
+            .https()
+            .port(3030)
             .run()
             .unwrap();
         tunnel.proc.lock().unwrap().kill().unwrap();
         std::thread::sleep(Duration::from_millis(2500));
-        assert!(tunnel.http().is_err())
+        assert!(tunnel.public_url().is_err())
     }
 
     #[tokio::test(threaded_scheduler)]
@@ -309,12 +293,14 @@ mod tests {
 
         let tunnel = builder()
             .executable("./ngrok")
-            .http()
+            .https()
             .port(3060)
             .run()
             .unwrap();
 
-        let status = ureq::get(tunnel.http().unwrap().as_str()).call().status();
+        let status = ureq::get(tunnel.public_url().unwrap().as_str())
+            .call()
+            .status();
         assert_eq!(status, 200);
 
         drop(handle)
