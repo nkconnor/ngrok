@@ -227,10 +227,8 @@ impl Builder {
 }
 
 fn find_public_url(port: u16) -> Result<url::Url, io::Error> {
-    use serde_json::Value;
-
     // Retrieve the `tunnel_url`
-    let response: Value = ureq::get("http://localhost:4040/api/tunnels")
+    let response = ureq::get("http://localhost:4040/api/tunnels")
         .call()
         .into_json()?;
 
@@ -241,7 +239,7 @@ fn find_public_url(port: u16) -> Result<url::Url, io::Error> {
         .unwrap_or(Err(Error::MalformedAPIResponse))?;
 
     // snag both HTTP/HTTPS urls
-    fn find_tunnel_url<'a, I: IntoIterator<Item = &'a Value>>(
+    fn find_tunnel_url<'a, I: IntoIterator<Item = &'a ureq::SerdeValue>>(
         scheme: &'static str,
         port: u16,
         iter: I,
