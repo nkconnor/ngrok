@@ -2,7 +2,7 @@
 name = "ngrok"
 version = "0.6.0"
 authors = ["nkconnor <email@nconnor.com>"]
-edition = "2018"
+edition = "2021"
 license = "MIT OR Apache-2.0"
 description = "A minimal ngrok wrapper"
 repository = "https://github.com/nkconnor/ngrok"
