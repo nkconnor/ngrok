@@ -1,3 +1,10 @@
+**NOTE**: This crate name was taken over by the fine folks at ngrok. The docs
+below only apply to versions <=0.6. You can see their repository here:
+https://github.com/ngrok/ngrok-rs.
+
+I am still continuing to use this repository and may add updates from
+time to time based on my own needs. 
+
 # ngrok &emsp; ![Build] [![Crate]](https://crates.io/crates/ngrok) [![Docs]](https://docs.rs/ngrok/)
 
 [build]: https://github.com/nkconnor/ngrok/workflows/tests/badge.svg
